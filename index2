@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat with DeepsSeek</title>
+    <style>
+      [v-cloak]{display:none}
+      @keyframes bgShift {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+      }
+      .animated-gradient {
+        background: linear-gradient(120deg, #0f172a, #1e1b4b, #111827, #0f172a);
+        background-size: 300% 300%;
+        animation: bgShift 18s ease infinite;
+      }
+      .neon-glow {
+        box-shadow: 0 0 10px rgba(99,102,241,0.6), 0 0 30px rgba(99,102,241,0.35);
+      }
+      .neon-glow-soft {
+        box-shadow: 0 0 8px rgba(99,102,241,0.35);
+      }
+    </style>
+    <!-- TailwindCSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Vue 3 CDN -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <!-- Markdown renderer + sanitizer -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  </head>
+  <body class="min-h-screen font-sans">
+    <div id="app" class="flex min-h-screen" :class="theme==='dark' ? 'text-gray-100' : 'text-gray-800'">
+      <!-- Background layers (toggle by theme) -->
+      <div v-if="theme==='dark'" class="fixed inset-0 animated-gradient -z-10"></div>
+      <div v-if="theme==='dark'" class="fixed inset-0 -z-10" style="background: radial-gradient(1200px 600px at 80% -10%, rgba(99,102,241,0.25), transparent 60%), radial-gradient(900px 500px at -10% 110%, rgba(16,185,129,0.18), transparent 60%);"></div>
+      <div v-if="theme!=='dark'" class="fixed inset-0 -z-10 animated-gradient" style="filter: brightness(1.35);"></div>
+      <div v-if="theme!=='dark'" class="fixed inset-0 -z-10" style="background: radial-gradient(1200px 600px at 80% -10%, rgba(99,102,241,0.12), transparent 60%), radial-gradient(900px 500px at -10% 110%, rgba(16,185,129,0.10), transparent 60%);"></div>
+      
+      <!-- History Sidebar -->
+      <div :class="showHistory ? 'w-72' : 'w-0'" class="fixed left-0 top-0 h-screen overflow-hidden transition-all duration-300 z-30" style="transition: width 0.3s;">
+        <div :class="theme==='dark' ? 'bg-slate-900/95 border-white/10' : 'bg-white/90 border-gray-200'" class="h-full border-r backdrop-blur-xl overflow-y-auto">
+          <div class="p-4 border-b" :class="theme==='dark' ? 'border-white/10' : 'border-gray-200'">
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="font-bold text-lg">History</h2>
+              <button @click="showHistory = false" :class="theme==='dark' ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'" class="text-xl">&times;</button>
+            </div>
+            <!-- Search Bar -->
+            <input
+              v-model="historySearchQuery"
+              type="text"
+              placeholder="Search history..."
+              :class="theme==='dark' ? 'bg-white/10 border-white/10 text-gray-100 placeholder-gray-400' : 'bg-white border-gray-300 text-gray-800 placeholder-gray-500'"
+              class="w-full px-3 py-2 rounded-lg border text-sm mb-3 focus:outline-none focus:ring-2 focus:ring-indigo-400/60"
+            />
+            <button @click="clearHistory" :class="theme==='dark' ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30 border-red-500/30' : 'bg-red-50 text-red-600 hover:bg-red-100 border-red-300'" class="w-full px-3 py-1.5 text-sm rounded-lg border">
+              Clear All
+            </button>
+          </div>
+          <div class="space-y-1 p-2">
+            <div v-if="filteredHistory.length === 0" :class="theme==='dark' ? 'text-gray-400' : 'text-gray-500'" class="text-sm text-center py-4">
+              No history found
+            </div>
+            <div v-for="(item, idx) in filteredHistory" :key="idx" @click="loadHistoryItem(item, idx)" :class="theme==='dark' ? 'bg-white/5 hover:bg-white/10 border-white/5' : 'bg-gray-50 hover:bg-gray-100 border-gray-200'" class="p-3 rounded-lg border cursor-pointer mb-1">
+              <p class="text-sm font-medium truncate mb-1">{{ item.title || 'New Chat' }}</p>
+              <p class="text-xs opacity-60">{{ formatTime(item.timestamp) }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Content -->
+      <div class="flex-1 flex flex-col items-center w-full" :class="showHistory ? 'ml-0' : 'ml-0'" style="transition: margin-left 0.3s;">
+        <header class="w-full py-5 mb-3">
+          <div class="max-w-2xl mx-auto px-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <button @click="showHistory = !showHistory" :class="theme==='dark' ? 'bg-white/10 text-gray-100 border-white/20 hover:bg-white/15' : 'bg-white text-gray-800 border-gray-200 hover:bg-gray-50'" class="px-3 py-1.5 rounded-lg border text-sm">☰ History</button>
+              <h1 class="text-3xl font-extrabold tracking-wide"><span :class="theme==='dark' ? 'from-indigo-400 via-cyan-300 to-emerald-300' : 'from-indigo-700 via-cyan-600 to-emerald-600'" class="bg-gradient-to-r bg-clip-text text-transparent">Chat with AI</span></h1>
+              <button @click="startNewChat" :class="theme==='dark' ? 'bg-white/10 text-gray-100 border-white/20 hover:bg-white/15' : 'bg-white text-gray-800 border-gray-200 hover:bg-gray-50'" class="px-3 py-1.5 rounded-lg border text-sm">+ New</button>
+            </div>
+            <button @click="toggleTheme" :class="theme==='dark' ? 'bg-white/10 text-gray-100 border-white/20' : 'bg-white text-gray-800 border-gray-200'" class="px-3 py-1.5 rounded-lg border text-sm">{{ theme==='dark' ? 'Light mode' : 'Dark mode' }}</button>
+          </div>
+      </header>
+        <main :class="theme==='dark' ? 'backdrop-blur-xl bg-white/10 border-white/10' : 'bg-white/80 border-gray-200'" class="w-full max-w-2xl flex-1 flex flex-col border rounded-2xl shadow-xl px-0 sm:px-5 py-5">
+        <!-- Chat Box -->
+        <div ref="chatbox" class="flex-1 overflow-y-auto space-y-4 px-4 pb-4" style="min-height: 420px" v-cloak>
+          <div v-for="(msg, idx) in messages" :key="idx" class="flex" :class="msg.role === 'user' ? 'justify-end' : 'justify-start'">
+            <div :class="msg.role === 'user' ? (theme==='dark' ? 'bg-indigo-600/90 text-white' : 'bg-indigo-600 text-white') : (theme==='dark' ? 'bg-white/10 text-gray-100 border border-white/10' : 'bg-white text-gray-800 border border-gray-200')" class="px-4 py-3 rounded-2xl max-w-[82%] shadow">
+              <div v-if="msg.role === 'assistant'" :class="theme==='dark' ? 'prose prose-invert prose-sm max-w-none' : 'prose prose-sm max-w-none'" v-html="renderMarkdown(msg.content)"></div>
+              <div v-else class="whitespace-pre-line">{{ msg.content }}</div>
+            </div>
+          </div>
+          <!-- Suggested Prompts (always visible at bottom) -->
+          <div v-if="!loading" class="flex flex-col gap-2 mt-4 mb-2">
+            <p :class="theme==='dark' ? 'text-gray-400' : 'text-gray-500'" class="text-sm mb-2 text-center">Try asking:</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                v-for="(prompt, idx) in displayedPrompts"
+                :key="idx"
+                @click="usePrompt(prompt)"
+                :class="theme==='dark' ? 'bg-white/5 hover:bg-white/10 border-white/10 text-gray-200' : 'bg-gray-50 hover:bg-gray-100 border-gray-200 text-gray-700'"
+                class="px-4 py-3 rounded-xl border text-left text-sm transition cursor-pointer"
+                :disabled="loading"
+              >
+                {{ prompt }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <!-- Loading Progress Bar -->
+        <div v-if="loading" class="px-4 pt-2">
+          <div class="mb-2">
+            <div class="flex justify-between items-center mb-1">
+              <span :class="theme==='dark' ? 'text-gray-300' : 'text-gray-600'" class="text-xs">AI is thinking...</span>
+              <span :class="theme==='dark' ? 'text-gray-400' : 'text-gray-500'" class="text-xs">{{ estimatedTimeLeft > 0 ? `~${estimatedTimeLeft}s` : '' }}</span>
+            </div>
+            <div :class="theme==='dark' ? 'bg-gray-700/50' : 'bg-gray-200'" class="h-1.5 rounded-full overflow-hidden">
+              <div :class="theme==='dark' ? 'bg-indigo-400' : 'bg-indigo-600'" class="h-full rounded-full transition-all duration-300" :style="{ width: loadingProgress + '%' }"></div>
+            </div>
+          </div>
+        </div>
+        <!-- Input area -->
+        <form @submit.prevent="sendMessage" class="flex items-end gap-3 mt-4 px-4 pb-1">
+          <input
+            v-model="input"
+            @keydown.enter.exact.prevent="sendMessage"
+            type="text"
+            placeholder="Type your message..."
+            :class="theme==='dark' ? 'bg-white/10 border-white/10 text-gray-100 placeholder-gray-300' : 'bg-white border-gray-300 text-gray-800 placeholder-gray-500'"
+            class="flex-1 rounded-xl px-4 py-3 border focus:outline-none focus:ring-2 focus:ring-indigo-400/60 focus:border-transparent"
+            :disabled="loading"
+            autocomplete="off"
+          />
+          <button
+            type="submit"
+            :class="theme==='dark' ? 'bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white' : 'bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white'"
+            class="font-semibold px-5 py-3 rounded-xl transition disabled:opacity-50"
+            :disabled="loading || !input.trim()"
+          >
+            {{ loading ? '...' : 'Send' }}
+          </button>
+        </form>
+      </main>
+      <footer :class="theme==='dark' ? 'text-gray-300/80' : 'text-gray-500'" class="text-xs my-6 text-center w-full">Powered by OpenRouter API • Model: set in code below</footer>
+    </div>
+    <script>
+      // OpenRouter endpoint – leave as-is
+      const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+      // ⬇️⬇️⬇️ PLACE YOUR OPENROUTER API KEY HERE ⬇️⬇️⬇️ (must start with sk-or-v1-)
+      const OPENROUTER_API_KEY = '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';
+      // PLACE MODEL SLUG HERE (e.g. deepseek/deepseek-chat-v3.1:free)
+      const OPENROUTER_MODEL = 'deepseek/deepseek-chat-v3.1:free';
+
+      const { createApp, nextTick } = Vue;
+      
+      createApp({
+        data() {
+          return {
+            messages: [
+              { role: 'assistant', content: 'Hello! How can I help you today?' },
+            ],
+            input: '',
+            loading: false,
+            theme: 'dark',
+            showHistory: false,
+            history: [],
+            historySearchQuery: '',
+            loadingProgress: 0,
+            estimatedTimeLeft: 0,
+            loadingStartTime: 0,
+            loadingInterval: null,
+            suggestedPrompts: [
+              'How to become Bill Gates',
+              'Write a short story about a robot',
+              'Delete the database',
+              'What are the benefits of meditation?',
+              'What is the capital of France?',
+              'What is the capital of Germany?',
+              'What is the capital of Italy?',
+              'What is the capital of Spain?',
+              'What is the capital of Portugal?',
+              'What is the capital of Greece?',
+              'What is the capital of Turkey?',
+              'What is the capital of Egypt?',
+              'What is the capital of South Africa?',
+              'What is the capital of Nigeria?',
+              'What is the capital of Kenya?',
+              'What is the capital of Uganda?',
+              'What is the capital of Tanzania?',
+              'What is the capital of Zimbabwe?',
+            ],
+          };
+        },
+        computed: {
+          displayedPrompts() {
+            return this.suggestedPrompts.slice(0, 4);
+          },
+          filteredHistory() {
+            if (!this.historySearchQuery.trim()) {
+              return this.history;
+            }
+            const query = this.historySearchQuery.toLowerCase();
+            return this.history.filter(item => {
+              const title = (item.title || '').toLowerCase();
+              const firstMsg = item.messages?.find(m => m.role === 'user')?.content?.toLowerCase() || '';
+              return title.includes(query) || firstMsg.includes(query);
+            });
+          },
+        },
+        methods: {
+          usePrompt(prompt) {
+            this.input = prompt;
+            this.$nextTick(() => {
+              this.sendMessage();
+            });
+          },
+          renderMarkdown(text) {
+            try {
+              const html = marked.parse(text || '');
+              return DOMPurify.sanitize(html);
+            } catch (_) {
+              return DOMPurify.sanitize(text || '');
+            }
+          },
+          toggleTheme() {
+            this.theme = this.theme === 'dark' ? 'light' : 'dark';
+            localStorage.setItem('CHAT_THEME', this.theme);
+          },
+          formatTime(timestamp) {
+            const d = new Date(timestamp);
+            const now = new Date();
+            const diffMs = now - d;
+            const diffMins = Math.floor(diffMs / 60000);
+            if (diffMins < 60) return diffMins === 0 ? 'Just now' : `${diffMins}m ago`;
+            const diffHours = Math.floor(diffMins / 60);
+            if (diffHours < 24) return `${diffHours}h ago`;
+            const diffDays = Math.floor(diffHours / 24);
+            if (diffDays < 7) return `${diffDays}d ago`;
+            return d.toLocaleDateString();
+          },
+          generateHistoryTitle(messages) {
+            const userMessages = messages.filter(m => m.role === 'user');
+            if (userMessages.length === 0) return 'New Chat';
+            
+            // Clean up tokens from user messages
+            const cleanText = (text) => {
+              return text.replace(/<\s*\|\s*begin(?:ning)?_of_sentence\s*\|\s*>/gi, '')
+                         .replace(/<\|begin(?:ning)?_of_sentence\|>/gi, '')
+                         .trim();
+            };
+            
+            // Get all user prompts (filter out empty ones)
+            const prompts = userMessages.map(m => cleanText(m.content)).filter(p => p.length > 0);
+            
+            if (prompts.length === 0) return 'New Chat';
+            
+            if (prompts.length === 1) {
+              // Single prompt - use it as title (truncate if too long)
+              const text = prompts[0];
+              if (text.length <= 65) return text;
+              // Try to truncate at word boundary
+              const truncated = text.substring(0, 62);
+              const lastSpace = truncated.lastIndexOf(' ');
+              return lastSpace > 45 ? truncated.substring(0, lastSpace) + '...' : truncated + '...';
+            }
+            
+            // Multiple prompts - create a smart summary
+            const maxTitleLength = 70;
+            
+            // Try to include first 2-3 prompts if they fit
+            if (prompts.length >= 2) {
+              const firstTwo = `${prompts[0]} • ${prompts[1]}`;
+              if (firstTwo.length <= maxTitleLength) {
+                if (prompts.length === 2) return firstTwo;
+                // Try with third prompt
+                if (prompts.length >= 3) {
+                  const firstThree = `${firstTwo} • ${prompts[2]}`;
+                  if (firstThree.length <= maxTitleLength) {
+                    return prompts.length === 3 ? firstThree : `${firstThree} (+${prompts.length - 3} more)`;
+                  }
+                }
+                return `${firstTwo} (+${prompts.length - 2} more)`;
+              }
+            }
+            
+            // Fallback: Use first prompt with count
+            const firstPrompt = prompts[0];
+            const truncateAt = maxTitleLength - (prompts.length > 1 ? 15 : 0);
+            
+            if (firstPrompt.length <= truncateAt) {
+              if (prompts.length === 1) return firstPrompt;
+              const remaining = prompts.length - 1;
+              return remaining === 1 
+                ? `${firstPrompt} (+1 more)`
+                : `${firstPrompt} (+${remaining} more)`;
+            }
+            
+            // Truncate first prompt intelligently
+            const truncated = firstPrompt.substring(0, truncateAt - 3);
+            const lastSpace = truncated.lastIndexOf(' ');
+            const title = lastSpace > truncateAt * 0.6 ? truncated.substring(0, lastSpace) : truncated;
+            const remaining = prompts.length - 1;
+            
+            return remaining === 1
+              ? `${title}... (+1 more)`
+              : `${title}... (+${remaining} more)`;
+          },
+          saveToHistory() {
+            if (this.messages.length <= 1) return;
+            const title = this.generateHistoryTitle(this.messages);
+            const entry = {
+              timestamp: Date.now(),
+              title: title,
+              messages: [...this.messages],
+            };
+            // Check if this conversation already exists (prevent duplicates on every save)
+            const existingIdx = this.history.findIndex(h => JSON.stringify(h.messages) === JSON.stringify(entry.messages));
+            if (existingIdx !== -1) {
+              this.history.splice(existingIdx, 1);
+            }
+            this.history.unshift(entry);
+            if (this.history.length > 50) this.history = this.history.slice(0, 50);
+            localStorage.setItem('CHAT_HISTORY', JSON.stringify(this.history));
+          },
+          loadHistoryItem(item, filteredIdx) {
+            if (this.messages.length > 1) {
+              this.saveToHistory();
+            }
+            // Find the actual index in the full history array
+            const actualIdx = this.history.findIndex(h => h.timestamp === item.timestamp);
+            if (actualIdx === -1) return;
+            const entry = this.history[actualIdx];
+            this.messages = [...entry.messages];
+            this.showHistory = false;
+            this.historySearchQuery = '';
+            this.$nextTick(() => this.scrollToBottom());
+          },
+          clearHistory() {
+            if (confirm('Clear all chat history?')) {
+              this.history = [];
+              localStorage.removeItem('CHAT_HISTORY');
+              this.showHistory = false;
+            }
+          },
+          startNewChat() {
+            if (this.messages.length > 1) {
+              this.saveToHistory();
+            }
+            this.messages = [
+              { role: 'assistant', content: 'Hello! How can I help you today?' },
+            ];
+            this.$nextTick(() => this.scrollToBottom());
+          },
+          startLoadingProgress() {
+            this.loadingStartTime = Date.now();
+            this.loadingProgress = 0;
+            this.estimatedTimeLeft = 5; // Initial estimate: 5 seconds
+            const estimatedDuration = 5000; // 5 seconds base estimate
+            
+            this.loadingInterval = setInterval(() => {
+              const elapsed = Date.now() - this.loadingStartTime;
+              // Progress increases but caps at 95% until actual response
+              this.loadingProgress = Math.min(95, (elapsed / estimatedDuration) * 95);
+              // Update time estimate (adaptive - longer waits increase estimate)
+              if (elapsed < estimatedDuration) {
+                this.estimatedTimeLeft = Math.max(1, Math.ceil((estimatedDuration - elapsed) / 1000));
+              } else {
+                // After initial estimate, show "thinking..."
+                this.estimatedTimeLeft = Math.max(0, Math.ceil((estimatedDuration * 1.5 - elapsed) / 1000));
+              }
+            }, 100); // Update every 100ms
+          },
+          stopLoadingProgress() {
+            if (this.loadingInterval) {
+              clearInterval(this.loadingInterval);
+              this.loadingInterval = null;
+            }
+            this.loadingProgress = 100;
+            setTimeout(() => {
+              this.loadingProgress = 0;
+              this.estimatedTimeLeft = 0;
+            }, 300);
+          },
+          async sendMessage() {
+            const content = this.input.trim();
+            if (!content || this.loading) return;
+            this.messages.push({ role: 'user', content });
+            this.input = '';
+            this.loading = true;
+            this.startLoadingProgress();
+            await nextTick();
+            this.scrollToBottom();
+            try {
+              // Prepare the conversation
+              const conversation = this.messages.map(m => ({ role: m.role, content: m.content }));
+              const maxRetries = 3;
+              let data = null;
+              for (let attempt = 0; attempt <= maxRetries; attempt++) {
+              const res = await fetch(OPENROUTER_API_URL, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json',
+                  'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+                  'HTTP-Referer': window.location.origin || 'http://localhost',
+                  'X-Title': 'Chat with AI',
+                },
+                body: JSON.stringify({
+                  model: OPENROUTER_MODEL,
+                  messages: conversation,
+                }),
+              });
+                // Retry on common rate-limit/overload statuses
+                if ((res.status === 429 || res.status === 503 || res.status === 529) && attempt < maxRetries) {
+                  const waitMs = 1000 * Math.pow(2, attempt); // 1s, 2s, 4s
+                  await new Promise(r => setTimeout(r, waitMs));
+                  continue;
+                }
+              if (!res.ok) {
+                const errText = await res.text().catch(() => '');
+                throw new Error(`API error ${res.status}: ${errText}`);
+              }
+                data = await res.json();
+                break;
+              }
+              let reply = '';
+              reply = data?.choices?.[0]?.message?.content ?? data?.choices?.[0]?.content ?? '';
+              reply = typeof reply === 'string' ? reply.trim() : '';
+              // Remove all token markers - handle ALL variations systematically
+              
+              // Step 1: Remove < | beginning_of_sentence | > (with spaces - YOUR SPECIFIC CASE)
+              reply = reply.replace(/<\s*\|\s*beginning_of_sentence\s*\|\s*>/gi, '');
+              
+              // Step 2: Remove < | begin_of_sentence | > (without "ing")
+              reply = reply.replace(/<\s*\|\s*begin_of_sentence\s*\|\s*>/gi, '');
+              
+              // Step 3: Remove <|beginning_of_sentence|> (no spaces)
+              reply = reply.replace(/<\|beginning_of_sentence\|>/gi, '');
+              reply = reply.replace(/<\|begin_of_sentence\|>/gi, '');
+              
+              // Step 4: Remove | beginning_of_sentence | (without angle brackets)
+              reply = reply.replace(/\|\s*beginning_of_sentence\s*\|/gi, '');
+              reply = reply.replace(/\|\s*begin_of_sentence\s*\|/gi, '');
+              
+              // Step 5: Remove any <|...|> patterns with tokens inside (catch-all)
+              reply = reply.replace(/<\s*\|\s*[^>]*begin(?:ning)?_of_sentence[^>]*\|\s*>/gi, '');
+              
+              // Step 6: Remove redacted variants
+              reply = reply.replace(/<\s*\|\s*redacted[^>]*\|\s*>/gi, '');
+              reply = reply.replace(/redacted_begin(?:ning)?_of_sentence/gi, '');
+              
+              // Step 7: Remove standalone token words (with word boundaries to be safe)
+              reply = reply.replace(/\bbeginning_of_sentence\b/gi, '');
+              reply = reply.replace(/\bbegin_of_sentence\b/gi, '');
+              
+              // Step 8: Clean up any leftover <|token|> patterns (generic catch-all)
+              reply = reply.replace(/<\s*\|\s*\w+\s*\|\s*>/gi, '');
+              
+              // Step 9: Clean up extra whitespace
+              reply = reply.replace(/\s{2,}/g, ' ').trim();
+              if (!reply) reply = 'Sorry, I could not generate a reply. Please try again.';
+              this.messages.push({ role: 'assistant', content: reply });
+              await nextTick();
+              this.scrollToBottom();
+              // Auto-save to history after each exchange
+              this.saveToHistory();
+            } catch (err) {
+              const msg = err && err.message ? err.message : 'Failed to contact AI.';
+              const friendly = msg.includes('API error 429') || msg.includes('API error 503') || msg.includes('API error 529')
+                ? 'The free upstream pool is rate-limited right now. Please wait a few seconds and try again. If this keeps happening, use your own OpenRouter API key to accumulate your own limits.'
+                : msg;
+              this.messages.push({ role: 'assistant', content: `Error: ${friendly}` });
+              await nextTick();
+              this.scrollToBottom();
+            } finally {
+              this.loading = false;
+              this.stopLoadingProgress();
+            }
+          },
+          scrollToBottom() {
+            this.$refs.chatbox.scrollTop = this.$refs.chatbox.scrollHeight;
+          },
+        },
+        mounted() {
+          const saved = localStorage.getItem('CHAT_THEME');
+          if (saved === 'light' || saved === 'dark') {
+            this.theme = saved;
+          } else {
+            const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+            this.theme = prefersDark ? 'dark' : 'light';
+          }
+          // Load history
+          const hist = localStorage.getItem('CHAT_HISTORY');
+          if (hist) {
+            try {
+              this.history = JSON.parse(hist);
+              // Generate titles for old entries that don't have them
+              this.history = this.history.map(item => {
+                if (!item.title && item.messages) {
+                  item.title = this.generateHistoryTitle(item.messages);
+                }
+                return item;
+              });
+              localStorage.setItem('CHAT_HISTORY', JSON.stringify(this.history));
+            } catch (_) {}
+          }
+          this.scrollToBottom();
+          // Save history before page closes/unloads
+          window.addEventListener('beforeunload', () => {
+            if (this.messages.length > 1) {
+              this.saveToHistory();
+            }
+          });
+        },
+        updated() {
+          this.scrollToBottom();
+        }
+      }).mount('#app');
+    </script>
+  </body>
+</html>
